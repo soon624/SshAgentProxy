@@ -228,7 +228,288 @@ public class SshAgentProtocolTests
 
     #endregion
 
+    #region ReadMessageAsync Tests
+
+    [Fact]
+    public async Task ReadMessageAsync_ValidMessage_ReturnsMessage()
+    {
+        // Arrange
+        var messageType = SshAgentMessageType.SSH_AGENTC_REQUEST_IDENTITIES;
+        var payload = new byte[] { 0x01, 0x02, 0x03 };
+        var stream = CreateMessageStream(messageType, payload);
+
+        // Act
+        var result = await SshAgentProtocol.ReadMessageAsync(stream);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal(messageType, result.Value.Type);
+        Assert.Equal(payload, result.Value.Payload.ToArray());
+    }
+
+    [Fact]
+    public async Task ReadMessageAsync_EmptyStream_ReturnsNull()
+    {
+        // Arrange
+        var stream = new MemoryStream();
+
+        // Act
+        var result = await SshAgentProtocol.ReadMessageAsync(stream);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task ReadMessageAsync_PartialHeader_ThrowsInvalidDataException()
+    {
+        // Arrange: Only 2 bytes of header (needs 4)
+        var stream = new MemoryStream(new byte[] { 0x00, 0x00 });
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidDataException>(() => SshAgentProtocol.ReadMessageAsync(stream));
+    }
+
+    [Fact]
+    public async Task ReadMessageAsync_ZeroLength_ThrowsInvalidDataException()
+    {
+        // Arrange: length = 0
+        var stream = new MemoryStream(new byte[] { 0x00, 0x00, 0x00, 0x00 });
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidDataException>(() => SshAgentProtocol.ReadMessageAsync(stream));
+    }
+
+    [Fact]
+    public async Task ReadMessageAsync_LengthExceedsLimit_ThrowsInvalidDataException()
+    {
+        // Arrange: length = 300KB (exceeds 256KB limit)
+        var header = new byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(header, 300 * 1024);
+        var stream = new MemoryStream(header);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidDataException>(() => SshAgentProtocol.ReadMessageAsync(stream));
+    }
+
+    [Fact]
+    public async Task ReadMessageAsync_TruncatedPayload_ThrowsInvalidDataException()
+    {
+        // Arrange: header says 10 bytes, but only 5 available
+        var header = new byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(header, 10);
+        var data = new byte[9]; // header + 5 bytes (not 10)
+        Array.Copy(header, data, 4);
+        data[4] = 0x0B; // message type
+        var stream = new MemoryStream(data);
+
+        // Act & Assert
+        await Assert.ThrowsAsync<InvalidDataException>(() => SshAgentProtocol.ReadMessageAsync(stream));
+    }
+
+    #endregion
+
+    #region WriteMessageAsync Tests
+
+    [Fact]
+    public async Task WriteMessageAsync_ValidMessage_WritesCorrectBytes()
+    {
+        // Arrange
+        var messageType = SshAgentMessageType.SSH_AGENT_SUCCESS;
+        var payload = new byte[] { 0x01, 0x02 };
+        var message = new SshAgentMessage(messageType, payload);
+        var stream = new MemoryStream();
+
+        // Act
+        await SshAgentProtocol.WriteMessageAsync(stream, message);
+
+        // Assert
+        var result = stream.ToArray();
+        Assert.Equal(7, result.Length); // 4 (length) + 1 (type) + 2 (payload)
+        Assert.Equal(3u, BinaryPrimitives.ReadUInt32BigEndian(result.AsSpan(0, 4))); // length = 3
+        Assert.Equal((byte)messageType, result[4]);
+        Assert.Equal(payload, result[5..]);
+    }
+
+    [Fact]
+    public async Task WriteMessageAsync_EmptyPayload_WritesCorrectBytes()
+    {
+        // Arrange
+        var message = SshAgentMessage.Success();
+        var stream = new MemoryStream();
+
+        // Act
+        await SshAgentProtocol.WriteMessageAsync(stream, message);
+
+        // Assert
+        var result = stream.ToArray();
+        Assert.Equal(5, result.Length); // 4 (length) + 1 (type)
+        Assert.Equal(1u, BinaryPrimitives.ReadUInt32BigEndian(result.AsSpan(0, 4))); // length = 1
+        Assert.Equal((byte)SshAgentMessageType.SSH_AGENT_SUCCESS, result[4]);
+    }
+
+    #endregion
+
+    #region SshAgentMessage Static Methods Tests
+
+    [Fact]
+    public void SshAgentMessage_Failure_ReturnsCorrectMessage()
+    {
+        // Act
+        var message = SshAgentMessage.Failure();
+
+        // Assert
+        Assert.Equal(SshAgentMessageType.SSH_AGENT_FAILURE, message.Type);
+        Assert.Empty(message.Payload.ToArray());
+    }
+
+    [Fact]
+    public void SshAgentMessage_Success_ReturnsCorrectMessage()
+    {
+        // Act
+        var message = SshAgentMessage.Success();
+
+        // Assert
+        Assert.Equal(SshAgentMessageType.SSH_AGENT_SUCCESS, message.Type);
+        Assert.Empty(message.Payload.ToArray());
+    }
+
+    [Fact]
+    public void SshAgentMessage_IdentitiesAnswer_ReturnsCorrectMessage()
+    {
+        // Arrange
+        var identities = new List<SshIdentity>
+        {
+            new(new byte[] { 0x01, 0x02 }, "test-key"),
+        };
+
+        // Act
+        var message = SshAgentMessage.IdentitiesAnswer(identities);
+
+        // Assert
+        Assert.Equal(SshAgentMessageType.SSH_AGENT_IDENTITIES_ANSWER, message.Type);
+        Assert.True(message.Payload.Length > 0);
+    }
+
+    [Fact]
+    public void SshAgentMessage_SignResponse_ReturnsCorrectMessage()
+    {
+        // Arrange
+        var signature = new byte[] { 0x01, 0x02, 0x03, 0x04 };
+
+        // Act
+        var message = SshAgentMessage.SignResponse(signature);
+
+        // Assert
+        Assert.Equal(SshAgentMessageType.SSH_AGENT_SIGN_RESPONSE, message.Type);
+        // Payload should be: 4 bytes length + signature
+        Assert.Equal(8, message.Payload.Length);
+        var sigLen = BinaryPrimitives.ReadUInt32BigEndian(message.Payload.Span[..4]);
+        Assert.Equal(4u, sigLen);
+        Assert.Equal(signature, message.Payload.Span[4..].ToArray());
+    }
+
+    #endregion
+
+    #region ParseIdentitiesAnswer Edge Cases
+
+    [Fact]
+    public void ParseIdentitiesAnswer_TruncatedKeyBlobLength_ThrowsInvalidDataException()
+    {
+        // Arrange: count = 1, keyBlobLen starts but truncated
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        WriteUInt32BE(writer, 1); // count
+        writer.Write(new byte[] { 0x00, 0x00 }); // partial keyBlobLen
+        var payload = ms.ToArray();
+
+        // Act & Assert
+        Assert.Throws<InvalidDataException>(() => SshAgentProtocol.ParseIdentitiesAnswer(payload));
+    }
+
+    [Fact]
+    public void ParseIdentitiesAnswer_KeyBlobLengthExceedsPayload_ThrowsInvalidDataException()
+    {
+        // Arrange: count = 1, keyBlobLen = 100 but not enough data
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        WriteUInt32BE(writer, 1); // count
+        WriteUInt32BE(writer, 100); // keyBlobLen
+        writer.Write(new byte[5]); // only 5 bytes
+        var payload = ms.ToArray();
+
+        // Act & Assert
+        Assert.Throws<InvalidDataException>(() => SshAgentProtocol.ParseIdentitiesAnswer(payload));
+    }
+
+    [Fact]
+    public void ParseIdentitiesAnswer_TruncatedCommentLength_ThrowsInvalidDataException()
+    {
+        // Arrange: count = 1, valid keyBlob, but commentLen truncated
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        WriteUInt32BE(writer, 1); // count
+        WriteUInt32BE(writer, 2); // keyBlobLen
+        writer.Write(new byte[] { 0x01, 0x02 }); // keyBlob
+        writer.Write(new byte[] { 0x00, 0x00 }); // partial commentLen
+        var payload = ms.ToArray();
+
+        // Act & Assert
+        Assert.Throws<InvalidDataException>(() => SshAgentProtocol.ParseIdentitiesAnswer(payload));
+    }
+
+    [Fact]
+    public void ParseIdentitiesAnswer_CommentLengthExceedsPayload_ThrowsInvalidDataException()
+    {
+        // Arrange: count = 1, valid keyBlob, commentLen = 100 but not enough
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        WriteUInt32BE(writer, 1); // count
+        WriteUInt32BE(writer, 2); // keyBlobLen
+        writer.Write(new byte[] { 0x01, 0x02 }); // keyBlob
+        WriteUInt32BE(writer, 100); // commentLen
+        writer.Write(new byte[5]); // only 5 bytes
+        var payload = ms.ToArray();
+
+        // Act & Assert
+        Assert.Throws<InvalidDataException>(() => SshAgentProtocol.ParseIdentitiesAnswer(payload));
+    }
+
+    #endregion
+
+    #region ParseSignRequest Edge Cases
+
+    [Fact]
+    public void ParseSignRequest_TruncatedDataLength_ThrowsInvalidDataException()
+    {
+        // Arrange: Valid keyBlob, but dataLen field truncated
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms);
+        WriteUInt32BE(writer, 2); // keyBlobLen
+        writer.Write(new byte[] { 0x01, 0x02 }); // keyBlob
+        writer.Write(new byte[] { 0x00, 0x00 }); // partial dataLen
+        var payload = ms.ToArray();
+
+        // Act & Assert
+        Assert.Throws<InvalidDataException>(() => SshAgentProtocol.ParseSignRequest(payload));
+    }
+
+    #endregion
+
     #region Helper Methods
+
+    private static MemoryStream CreateMessageStream(SshAgentMessageType type, byte[] payload)
+    {
+        var ms = new MemoryStream();
+        var length = 1 + payload.Length;
+        var header = new byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(header, (uint)length);
+        ms.Write(header);
+        ms.WriteByte((byte)type);
+        ms.Write(payload);
+        ms.Position = 0;
+        return ms;
+    }
 
     private static byte[] CreateSignRequestPayload(byte[] keyBlob, byte[] data, uint flags = 0, bool includeFlags = true)
     {
