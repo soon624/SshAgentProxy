@@ -11,7 +11,7 @@ public class SshAgentProxyService : IAsyncDisposable
     private readonly NamedPipeAgentServer _server;
     private string _currentAgent;
     private readonly Dictionary<string, string> _keyToAgent = new(); // fingerprint -> agent name
-    private readonly List<SshIdentity> _allKeys = new(); // 全agentの鍵（マージ用）
+    private readonly List<SshIdentity> _allKeys = new(); // merged keys from all agents
     private bool _keysScanned = false;
 
     public event Action<string>? OnLog;
@@ -24,7 +24,7 @@ public class SshAgentProxyService : IAsyncDisposable
         _server = new NamedPipeAgentServer(config.ProxyPipeName, HandleRequestAsync);
         _server.OnLog += msg => OnLog?.Invoke(msg);
 
-        // 設定からキーマッピングを読み込み
+        // Load key mappings from config
         foreach (var mapping in config.KeyMappings)
         {
             if (!string.IsNullOrEmpty(mapping.Fingerprint))
@@ -39,7 +39,7 @@ public class SshAgentProxyService : IAsyncDisposable
         Log($"Starting proxy on pipe: {_config.ProxyPipeName}");
         Log($"Backend pipe: {_config.BackendPipeName}");
 
-        // 現在のbackendから鍵を取得（起動/切り替えはしない）
+        // Get keys from current backend (without starting/switching agents)
         await ScanKeysAsync(ct);
 
         _server.Start();
@@ -54,7 +54,7 @@ public class SshAgentProxyService : IAsyncDisposable
     {
         Log("Scanning keys from current backend...");
 
-        // 現在のbackendから鍵を取得（起動/切り替えはしない）
+        // Get keys from current backend (without starting/switching agents)
         using var client = await ConnectToBackendAsync(ct);
         if (client == null)
         {
@@ -69,13 +69,13 @@ public class SshAgentProxyService : IAsyncDisposable
 
             foreach (var key in keys)
             {
-                // 既知のマッピングがなければ追加（現在のagentとして）
+                // Add mapping if not already known (map to current agent)
                 if (!_keyToAgent.ContainsKey(key.Fingerprint))
                 {
                     _keyToAgent[key.Fingerprint] = _currentAgent;
                 }
 
-                // 重複チェック
+                // Check for duplicates
                 if (!_allKeys.Any(k => k.Fingerprint == key.Fingerprint))
                 {
                     _allKeys.Add(key);
@@ -116,13 +116,13 @@ public class SshAgentProxyService : IAsyncDisposable
 
     public Task ForceSwitchToAsync(string agentName, bool startSecondary, CancellationToken ct = default)
     {
-        // 強制切り替え（現在のagent状態を無視）
+        // Force switch (ignore current agent state)
         _currentAgent = agentName == "1Password" ? "Bitwarden" : "1Password";
         return SwitchToAsync(agentName, startSecondary, ct);
     }
 
     /// <summary>
-    /// 指定したagentが起動していなければ起動する（他のagentは終了しない）
+    /// Start the specified agent if not running (does not stop other agents)
     /// </summary>
     public async Task EnsureAgentRunningAsync(string agentName, CancellationToken ct = default)
     {
@@ -140,7 +140,7 @@ public class SshAgentProxyService : IAsyncDisposable
 
         Log($"Starting {agentName}...");
         StartProcessIfNeeded(agent.ProcessName, agent.ExePath);
-        await Task.Delay(3000, ct); // 起動を待つ
+        await Task.Delay(3000, ct); // Wait for startup
         _currentAgent = agentName;
         Log($"{agentName} started");
     }
@@ -164,16 +164,16 @@ public class SshAgentProxyService : IAsyncDisposable
             ? (_config.Agents.OnePassword, _config.Agents.Bitwarden)
             : (_config.Agents.Bitwarden, _config.Agents.OnePassword);
 
-        // 1. ヘルパープロセスを終了（パイプを解放させる）
+        // 1. Kill processes to release the pipe
         await KillProcessAsync(primary.ProcessName);
         await KillProcessAsync(secondary.ProcessName);
         await Task.Delay(1000, ct);
 
-        // 2. プライマリを先に起動（pipeを取得）
+        // 2. Start primary first (to acquire the pipe)
         StartProcessIfNeeded(primary.ProcessName, primary.ExePath);
-        await Task.Delay(3000, ct); // 起動を待つ
+        await Task.Delay(3000, ct); // Wait for startup
 
-        // 3. セカンダリを起動（オプション）
+        // 3. Start secondary (optional)
         if (startSecondary)
         {
             StartProcessIfNeeded(secondary.ProcessName, secondary.ExePath);
@@ -200,7 +200,7 @@ public class SshAgentProxyService : IAsyncDisposable
 
         if (_keysScanned && _allKeys.Count > 0)
         {
-            // スキャン済みならマージされた全鍵を返す
+            // Return merged keys if already scanned
             Log($"  Returning {_allKeys.Count} merged keys");
             foreach (var id in _allKeys)
             {
@@ -210,13 +210,13 @@ public class SshAgentProxyService : IAsyncDisposable
             return Task.FromResult(SshAgentMessage.IdentitiesAnswer(_allKeys));
         }
 
-        // スキャン未完了の場合は現在のbackendから取得
+        // If not scanned yet, get keys from backend
         return HandleRequestIdentitiesFromBackendAsync(ct);
     }
 
     private async Task<SshAgentMessage> HandleRequestIdentitiesFromBackendAsync(CancellationToken ct)
     {
-        // 両方のagentから鍵を取得
+        // Get keys from both agents
         await ScanAllAgentsAsync(ct);
 
         if (_allKeys.Count == 0)
@@ -233,10 +233,10 @@ public class SshAgentProxyService : IAsyncDisposable
     {
         Log("  Scanning all agents for keys...");
 
-        // 1Password をスキャン
+        // Scan 1Password
         await ScanAgentAsync("1Password", ct);
 
-        // Bitwarden をスキャン
+        // Scan Bitwarden
         await ScanAgentAsync("Bitwarden", ct);
 
         _keysScanned = _allKeys.Count > 0;
@@ -247,18 +247,18 @@ public class SshAgentProxyService : IAsyncDisposable
     {
         Log($"    Scanning {agentName}...");
 
-        // 現在のagentと違う場合は切り替え
+        // Switch to this agent if different from current
         if (_currentAgent != agentName)
         {
             await ForceSwitchToAsync(agentName, startSecondary: false, ct);
         }
         else
         {
-            // 同じagentでも起動していなければ起動
+            // Start agent if not running
             await EnsureAgentRunningAsync(agentName, ct);
         }
 
-        await Task.Delay(500, ct); // パイプ安定化待ち
+        await Task.Delay(500, ct); // Wait for pipe to stabilize
 
         using var client = await ConnectToBackendAsync(ct);
         if (client == null)
@@ -298,12 +298,12 @@ public class SshAgentProxyService : IAsyncDisposable
 
         Log($"Request: Sign with key {fingerprint}");
 
-        // キーマッピングがあれば、そのagentを使う
+        // Use mapped agent if key mapping exists
         if (_keyToAgent.TryGetValue(fingerprint, out var mappedAgent))
         {
             Log($"  Key mapped to {mappedAgent}");
 
-            // 現在のagentが違う場合のみ切り替え
+            // Switch only if current agent is different
             if (_currentAgent != mappedAgent)
             {
                 Log($"  Switching to {mappedAgent}...");
@@ -316,12 +316,12 @@ public class SshAgentProxyService : IAsyncDisposable
                 Log($"  Signed by {mappedAgent}");
                 return SshAgentMessage.SignResponse(signature);
             }
-            // マッピングが古い場合、クリアしてフォールバック
+            // Clear stale mapping and try fallback
             Log($"  Mapped agent failed, trying fallback...");
             _keyToAgent.Remove(fingerprint);
         }
 
-        // 現在のバックエンドで試す（起動中の場合）
+        // Try current backend (if running)
         Log($"  Trying current backend...");
         var sig = await TrySignAsync(keyBlob, data, flags, ct);
         if (sig != null)
@@ -331,7 +331,7 @@ public class SshAgentProxyService : IAsyncDisposable
             return SshAgentMessage.SignResponse(sig);
         }
 
-        // バックエンド未接続 or 署名失敗 → 1Passwordに切り替えて試す
+        // Backend not connected or sign failed - try 1Password
         if (_currentAgent != "1Password")
         {
             Log($"  Switching to 1Password...");
@@ -339,7 +339,7 @@ public class SshAgentProxyService : IAsyncDisposable
         }
         else
         {
-            // 1Passwordが_currentAgentなのに接続できなかった → 起動する
+            // 1Password is current but not connected - start it
             Log($"  Starting 1Password...");
             await EnsureAgentRunningAsync("1Password", ct);
         }
@@ -353,7 +353,7 @@ public class SshAgentProxyService : IAsyncDisposable
             return SshAgentMessage.SignResponse(sig);
         }
 
-        // 1Password失敗 → Bitwardenに切り替えて試す
+        // 1Password failed - try Bitwarden
         Log($"  Switching to Bitwarden...");
         await ForceSwitchToAsync("Bitwarden", startSecondary: false, ct);
 
@@ -417,7 +417,7 @@ public class SshAgentProxyService : IAsyncDisposable
         Log($"  Stopping {processName} ({processes.Length} processes)...");
         try
         {
-            // WMICを使用（セッション跨ぎに強い）
+            // Use WMIC (works across sessions)
             var psi = new ProcessStartInfo
             {
                 FileName = "wmic",
@@ -436,7 +436,7 @@ public class SshAgentProxyService : IAsyncDisposable
                     Log($"    wmic: {output.Trim()}");
             }
 
-            // プロセスが完全に終了するまで待機
+            // Wait for process to fully terminate
             for (int i = 0; i < 10; i++)
             {
                 await Task.Delay(500);
@@ -457,7 +457,7 @@ public class SshAgentProxyService : IAsyncDisposable
 
     private void StartProcessIfNeeded(string processName, string exePath)
     {
-        // 既に起動していればスキップ
+        // Skip if already running
         var existing = Process.GetProcessesByName(processName);
         if (existing.Length > 0)
         {

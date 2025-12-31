@@ -1,6 +1,6 @@
 using SshAgentProxy;
 
-// コマンドライン引数
+// Command line arguments
 if (args.Length > 0)
 {
     switch (args[0])
@@ -45,7 +45,7 @@ Console.WriteLine("║     1Password / Bitwarden Switcher   ║");
 Console.WriteLine("╚══════════════════════════════════════╝");
 Console.WriteLine();
 
-// SSH_AUTH_SOCK が未設定ならユーザー環境変数に設定
+// Set SSH_AUTH_SOCK user environment variable if not configured
 var expectedSock = @"\\.\pipe\ssh-agent-proxy";
 var currentSock = Environment.GetEnvironmentVariable("SSH_AUTH_SOCK", EnvironmentVariableTarget.User);
 if (string.IsNullOrEmpty(currentSock) || currentSock != expectedSock)
@@ -90,7 +90,7 @@ Console.WriteLine("Commands: '1' = switch to 1Password, '2' = switch to Bitwarde
 Console.WriteLine("Press Ctrl+C to stop");
 Console.WriteLine();
 
-// コンソールが使えるかチェック
+// Check if console is available
 bool consoleAvailable = true;
 try
 {
@@ -134,19 +134,19 @@ try
     }
     else
     {
-        // コンソールなしの場合は無限待機
+        // Wait indefinitely if no console
         await Task.Delay(Timeout.Infinite, cts.Token);
     }
 }
 catch (OperationCanceledException)
 {
-    // 正常終了
+    // Normal termination
 }
 
 Console.WriteLine();
 Console.WriteLine("Shutting down...");
 
-// テスト用関数
+// Test function
 async Task TestSwitchAsync(string targetAgent, bool force)
 {
     Console.WriteLine($"=== Testing switch to {targetAgent} (force={force}) ===");

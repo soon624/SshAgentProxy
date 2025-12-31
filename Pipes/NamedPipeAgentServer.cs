@@ -45,7 +45,7 @@ public class NamedPipeAgentServer : IDisposable
         {
             try
             {
-                // セキュリティ設定: 現在のユーザーにフルアクセスを許可
+                // Security: Grant full control to current user
                 var security = new PipeSecurity();
                 var currentUser = WindowsIdentity.GetCurrent().User;
                 if (currentUser != null)
@@ -55,7 +55,7 @@ public class NamedPipeAgentServer : IDisposable
                         PipeAccessRights.FullControl,
                         AccessControlType.Allow));
                 }
-                // Everyoneにも読み書きを許可（ssh-add等が接続できるように）
+                // Allow read/write access to Everyone (so ssh-add etc. can connect)
                 security.AddAccessRule(new PipeAccessRule(
                     new SecurityIdentifier(WellKnownSidType.WorldSid, null),
                     PipeAccessRights.ReadWrite,
@@ -126,7 +126,7 @@ public class NamedPipeAgentServer : IDisposable
     {
         try
         {
-            // Windows APIでクライアントのプロセスIDを取得
+            // Get client process ID via Windows API
             if (GetNamedPipeClientProcessId(pipe.SafePipeHandle.DangerousGetHandle(), out var processId))
                 return (int)processId;
         }
