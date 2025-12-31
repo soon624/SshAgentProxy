@@ -20,9 +20,7 @@ public class Config
         ["1Password"] = new()
         {
             ProcessName = "1Password",
-            ExePath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                @"1Password\app\8\1Password.exe"),
+            ExePath = "1Password",  // Assumes 1Password is in PATH
             Priority = 1
         },
         ["Bitwarden"] = new()
@@ -127,11 +125,14 @@ public class AgentAppConfig
 
 public class KeyMapping
 {
-    [JsonPropertyName("comment")]
-    public string? Comment { get; set; }
-
     [JsonPropertyName("fingerprint")]
     public string? Fingerprint { get; set; }
+
+    [JsonPropertyName("keyBlob")]
+    public string? KeyBlob { get; set; }  // Base64 encoded
+
+    [JsonPropertyName("comment")]
+    public string? Comment { get; set; }
 
     [JsonPropertyName("agent")]
     public string Agent { get; set; } = "1Password";
