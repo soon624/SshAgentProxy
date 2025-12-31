@@ -234,27 +234,50 @@ public class SshAgentProxyService : IAsyncDisposable
     private async Task KillProcessAsync(string processName)
     {
         var processes = Process.GetProcessesByName(processName);
-        foreach (var process in processes)
+        if (processes.Length == 0)
         {
-            try
-            {
-                // メインウィンドウを持つプロセス（アプリ本体）はスキップ
-                // ヘルパープロセスのみをKillする
-                if (process.MainWindowHandle != IntPtr.Zero)
-                {
-                    Log($"  Skipping {processName} main process (PID: {process.Id})");
-                    continue;
-                }
+            Log($"  {processName} is not running");
+            return;
+        }
 
-                Log($"  Killing {processName} helper (PID: {process.Id})");
-                process.Kill();
-                await process.WaitForExitAsync();
-                Log($"    Killed");
-            }
-            catch (Exception ex)
+        Log($"  Stopping {processName} ({processes.Length} processes)...");
+        try
+        {
+            // WMICを使用（セッション跨ぎに強い）
+            var psi = new ProcessStartInfo
             {
-                Log($"    Warning: {ex.Message}");
+                FileName = "wmic",
+                Arguments = $"process where name='{processName}.exe' delete",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            var proc = Process.Start(psi);
+            if (proc != null)
+            {
+                await proc.WaitForExitAsync();
+                var output = await proc.StandardOutput.ReadToEndAsync();
+                if (!string.IsNullOrEmpty(output) && output.Contains("error", StringComparison.OrdinalIgnoreCase))
+                    Log($"    wmic: {output.Trim()}");
             }
+
+            // プロセスが完全に終了するまで待機
+            for (int i = 0; i < 10; i++)
+            {
+                await Task.Delay(500);
+                var remaining = Process.GetProcessesByName(processName);
+                if (remaining.Length == 0)
+                {
+                    Log($"    Stopped");
+                    return;
+                }
+            }
+            Log($"    Warning: Some processes may still be running");
+        }
+        catch (Exception ex)
+        {
+            Log($"    Warning: {ex.Message}");
         }
     }
 
