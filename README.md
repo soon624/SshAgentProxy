@@ -165,21 +165,20 @@ The proxy uses these mappings to:
 
 1. **Proxy Pipe**: Creates `\\.\pipe\ssh-agent-proxy` for SSH clients
 2. **Backend Pipe**: Forwards requests to `\\.\pipe\openssh-ssh-agent` (owned by the active agent)
-3. **Key Discovery**: On first identity request, scans both agents to build a complete key list
+3. **Key Discovery**: On first identity request, scans agents to build a complete key list (cached for future use)
 4. **Smart Routing**: When signing, checks which agent owns the key and switches if necessary
-5. **Process Management**: Uses PowerShell CIM to terminate processes across sessions when switching agents
-6. **Both Agents Running**: After signing, automatically starts the secondary agent so both are available
+5. **Key Caching**: Stores key data in config for instant startup without rescanning
 
 ### Agent Switching Flow
 
 ```
-SSH Client → Proxy → Check key ownership → Switch agent if needed → Backend Agent → Sign → Response
+SSH Client → Proxy → Check key mapping → Switch agent if needed → Wait for auth → Sign → Response
 ```
 
 When switching agents:
-1. Kill both agent processes (releases the pipe)
+1. Kill current agent process (releases the pipe)
 2. Start target agent (acquires the pipe)
-3. Optionally start secondary agent (won't affect pipe ownership)
+3. Wait for user authentication if needed (up to ~15 seconds)
 
 ## Troubleshooting
 
@@ -210,6 +209,7 @@ The following edge cases are not handled and may require manual intervention:
 - **Rotated keys**: If you delete/recreate a key with the same fingerprint, stale mappings in `config.json` may cause routing issues. Manually edit the `keyMappings` array to remove outdated entries.
 - **Multi-key operations**: If a single SSH operation requires keys from multiple agents (rare), only the first key's agent will be used.
 - **Locked vaults**: If an agent's vault is locked, key listing may return empty. Unlock the vault and press `r` to rescan.
+- **Initial scan with multiple agents**: During the first scan, if one agent already holds the pipe, keys from other agents may not be discovered until they are used for signing. The proxy learns key-to-agent mappings over time.
 
 ## License
 

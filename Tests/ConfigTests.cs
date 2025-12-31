@@ -307,6 +307,56 @@ public class ConfigTests : IDisposable
         Assert.Equal("work@company.com", config.KeyMappings[0].Comment);
     }
 
+    [Fact]
+    public void KeyMappings_SupportsKeyBlobCaching()
+    {
+        // Arrange
+        var configPath = Path.Combine(_tempDir, "config.json");
+        var config = Config.LoadOrCreate(configPath);
+        var keyBlob = Convert.ToBase64String(new byte[] { 0x00, 0x00, 0x00, 0x07, 0x73, 0x73, 0x68, 0x2d, 0x72, 0x73, 0x61 });
+        config.KeyMappings.Add(new KeyMapping
+        {
+            Fingerprint = "ABC123",
+            KeyBlob = keyBlob,
+            Comment = "test@example.com",
+            Agent = "1Password"
+        });
+
+        // Act
+        config.Save();
+        var loaded = Config.LoadOrCreate(configPath);
+
+        // Assert
+        Assert.Single(loaded.KeyMappings);
+        Assert.Equal("ABC123", loaded.KeyMappings[0].Fingerprint);
+        Assert.Equal(keyBlob, loaded.KeyMappings[0].KeyBlob);
+        Assert.Equal("test@example.com", loaded.KeyMappings[0].Comment);
+        Assert.Equal("1Password", loaded.KeyMappings[0].Agent);
+    }
+
+    [Fact]
+    public void KeyMappings_KeyBlobCanBeNull()
+    {
+        // Arrange - old config without keyBlob should still load
+        var configPath = Path.Combine(_tempDir, "config.json");
+        File.WriteAllText(configPath, """
+        {
+            "keyMappings": [
+                { "fingerprint": "ABC123", "agent": "1Password" }
+            ]
+        }
+        """);
+
+        // Act
+        var config = Config.LoadOrCreate(configPath);
+
+        // Assert
+        Assert.Single(config.KeyMappings);
+        Assert.Equal("ABC123", config.KeyMappings[0].Fingerprint);
+        Assert.Null(config.KeyMappings[0].KeyBlob);
+        Assert.Equal("1Password", config.KeyMappings[0].Agent);
+    }
+
     #endregion
 
     #region AgentAppConfig Tests
