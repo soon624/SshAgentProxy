@@ -5,3 +5,4 @@ obj/
 .claude/
 claude.log
 TestResults/
+publish/
