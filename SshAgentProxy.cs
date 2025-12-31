@@ -145,6 +145,25 @@ public class SshAgentProxyService : IAsyncDisposable
         Log($"{agentName} started");
     }
 
+    /// <summary>
+    /// Start the secondary agent in the background (fire and forget)
+    /// </summary>
+    private async Task EnsureSecondaryAgentRunningAsync(string primaryAgent, CancellationToken ct)
+    {
+        var secondaryName = primaryAgent == "1Password" ? "Bitwarden" : "1Password";
+        var secondary = primaryAgent == "1Password"
+            ? _config.Agents.Bitwarden
+            : _config.Agents.OnePassword;
+
+        var processes = Process.GetProcessesByName(secondary.ProcessName);
+        if (processes.Length > 0)
+            return; // Already running
+
+        Log($"  Starting {secondaryName} in background...");
+        await Task.Delay(1000, ct); // Brief delay before starting secondary
+        StartProcessIfNeeded(secondary.ProcessName, secondary.ExePath);
+    }
+
     public async Task SwitchToAsync(string agentName, CancellationToken ct = default)
     {
         await SwitchToAsync(agentName, startSecondary: true, ct);
@@ -314,6 +333,7 @@ public class SshAgentProxyService : IAsyncDisposable
             if (signature != null)
             {
                 Log($"  Signed by {mappedAgent}");
+                _ = EnsureSecondaryAgentRunningAsync(mappedAgent, ct);
                 return SshAgentMessage.SignResponse(signature);
             }
             // Clear stale mapping and try fallback
@@ -328,6 +348,7 @@ public class SshAgentProxyService : IAsyncDisposable
         {
             _keyToAgent[fingerprint] = _currentAgent;
             Log($"  Signed by {_currentAgent} (mapping saved)");
+            _ = EnsureSecondaryAgentRunningAsync(_currentAgent, ct);
             return SshAgentMessage.SignResponse(sig);
         }
 
@@ -350,6 +371,7 @@ public class SshAgentProxyService : IAsyncDisposable
         {
             _keyToAgent[fingerprint] = "1Password";
             Log($"  Signed by 1Password (mapping saved)");
+            _ = EnsureSecondaryAgentRunningAsync("1Password", ct);
             return SshAgentMessage.SignResponse(sig);
         }
 
@@ -362,6 +384,7 @@ public class SshAgentProxyService : IAsyncDisposable
         {
             _keyToAgent[fingerprint] = "Bitwarden";
             Log($"  Signed by Bitwarden (mapping saved)");
+            _ = EnsureSecondaryAgentRunningAsync("Bitwarden", ct);
             return SshAgentMessage.SignResponse(sig);
         }
 
