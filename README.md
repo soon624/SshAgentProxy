@@ -180,6 +180,30 @@ When switching agents:
 2. Start target agent (acquires the pipe)
 3. Wait for user authentication if needed (up to ~15 seconds)
 
+### Terminology
+
+- **Scan (Key Listing)**: Requesting the list of available keys (`ssh-add -l`). The proxy uses this to discover keys and detect pipe ownership.
+- **Sign**: Authenticating with a key during SSH connection (`ssh user@host`). The target agent must own the pipe and be unlocked.
+
+### Agent Behavior Differences
+
+The proxy's strategy is optimized based on observed differences between 1Password and Bitwarden:
+
+| Behavior | 1Password | Bitwarden |
+|----------|-----------|-----------|
+| Key listing when locked | Returns keys | Requires unlock |
+| Pipe acquisition | First-come-first-served | Can steal from others |
+| After other agent exits | Does not auto-acquire pipe | N/A |
+
+**Implications:**
+
+- **Bitwarden unlock prompts**: Querying Bitwarden (even just listing keys) triggers an unlock prompt. The proxy minimizes Bitwarden interactions by using cached key mappings and process detection instead of pipe queries.
+- **Pipe ownership detection**: Instead of querying the pipe (which would trigger Bitwarden unlock), the proxy checks which agent processes are running:
+  - Bitwarden running → Bitwarden owns the pipe
+  - Only 1Password running → Check pipe with a lightweight scan (1Password responds without unlock)
+  - Neither running → No one owns the pipe
+- **Startup optimization**: If key mappings already reference 2+ different agents, the proxy skips the initial scan entirely and uses cached data.
+
 ## Troubleshooting
 
 ### SSH operations hang or fail
