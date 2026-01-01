@@ -556,7 +556,9 @@ public class SshAgentProxyService : IAsyncDisposable
             // If we found a matching key, prioritize it (move to front)
             if (matchedFingerprint != null)
             {
-                var matchedKey = keysToReturn.FirstOrDefault(k => k.Fingerprint == matchedFingerprint);
+                // Use case-insensitive comparison for fingerprints
+                var matchedKey = keysToReturn.FirstOrDefault(k =>
+                    string.Equals(k.Fingerprint, matchedFingerprint, StringComparison.OrdinalIgnoreCase));
                 if (matchedKey != null)
                 {
                     keysToReturn.Remove(matchedKey);
@@ -571,7 +573,8 @@ public class SshAgentProxyService : IAsyncDisposable
         }
 
         // Show key selection dialog if no host pattern matched and multiple keys available
-        if (matchedFingerprint == null && keysToReturn.Count > 1)
+        // Only show dialog in interactive environments (not when running as service)
+        if (matchedFingerprint == null && keysToReturn.Count > 1 && Environment.UserInteractive)
         {
             Log($"  Showing key selection dialog ({keysToReturn.Count} keys available)...");
 
@@ -594,11 +597,13 @@ public class SshAgentProxyService : IAsyncDisposable
                         ? $"{connectionInfo.Host}:{owner}/*"
                         : $"{connectionInfo.Host}:*";
 
-                    // Check if this pattern already exists
-                    var existing = _config.HostKeyMappings.FirstOrDefault(m => m.Pattern == pattern);
+                    // Check if this pattern already exists (case-insensitive)
+                    var existing = _config.HostKeyMappings.FirstOrDefault(m =>
+                        string.Equals(m.Pattern, pattern, StringComparison.OrdinalIgnoreCase));
                     if (existing == null)
                     {
-                        _config.HostKeyMappings.Add(new HostKeyMapping
+                        // Insert at the beginning so specific patterns take precedence over catch-all patterns
+                        _config.HostKeyMappings.Insert(0, new HostKeyMapping
                         {
                             Pattern = pattern,
                             Fingerprint = selectedKey.Fingerprint,
@@ -613,6 +618,10 @@ public class SshAgentProxyService : IAsyncDisposable
             {
                 Log("  Dialog cancelled, returning all keys");
             }
+        }
+        else if (matchedFingerprint == null && keysToReturn.Count > 1 && !Environment.UserInteractive)
+        {
+            Log("  Non-interactive environment, using first available key");
         }
 
         // Log what we're returning

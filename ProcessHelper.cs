@@ -15,8 +15,9 @@ public static class ProcessHelper
         {
             using var searcher = new ManagementObjectSearcher(
                 $"SELECT CommandLine FROM Win32_Process WHERE ProcessId = {processId}");
+            using var results = searcher.Get();
 
-            foreach (var obj in searcher.Get())
+            foreach (var obj in results)
             {
                 return obj["CommandLine"]?.ToString();
             }
@@ -111,8 +112,9 @@ public static class ProcessHelper
         {
             using var searcher = new ManagementObjectSearcher(
                 $"SELECT ParentProcessId FROM Win32_Process WHERE ProcessId = {clientPid}");
+            using var results = searcher.Get();
 
-            foreach (var obj in searcher.Get())
+            foreach (var obj in results)
             {
                 var parentPid = Convert.ToInt32(obj["ParentProcessId"]);
                 var parentCommandLine = GetCommandLine(parentPid);
@@ -219,10 +221,19 @@ public class SshConnectionInfo
             return string.Equals(actualOwner, patternOwner, StringComparison.OrdinalIgnoreCase);
         }
 
-        // Exact match
-        return string.Equals(Repository?.TrimEnd(".git".ToCharArray()),
-            patternPath.TrimEnd(".git".ToCharArray()),
+        // Exact match (strip .git suffix properly)
+        return string.Equals(StripGitSuffix(Repository),
+            StripGitSuffix(patternPath),
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? StripGitSuffix(string? path)
+    {
+        if (string.IsNullOrEmpty(path))
+            return path;
+        return path.EndsWith(".git", StringComparison.OrdinalIgnoreCase)
+            ? path[..^4]
+            : path;
     }
 
     public override string ToString()
