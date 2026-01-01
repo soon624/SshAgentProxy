@@ -116,11 +116,25 @@ Console.CancelKeyPress += (_, e) =>
     cts.Cancel();
 };
 
-// Create tray icon (starts initialization in background)
+// Create tray icon
 using var trayIcon = new TrayIcon(versionStr);
 trayIcon.OnSwitchAgent += proxy.SwitchToAsync;
 trayIcon.OnRescanKeys += proxy.ScanKeysAsync;
 trayIcon.OnExit += () => cts.Cancel();
+trayIcon.UpdateHostMappingsMenu(config.HostKeyMappings);
+
+// Start minimized if requested (retry a few times to ensure tray is ready)
+if (startMinimized)
+{
+    _ = Task.Run(() =>
+    {
+        for (int i = 0; i < 10; i++)
+        {
+            Thread.Sleep(100);
+            try { trayIcon.HideConsole(); return; } catch { }
+        }
+    });
+}
 
 await proxy.StartAsync(cts.Token);
 
@@ -201,17 +215,6 @@ if (consoleAvailable && ui != null)
     keyInputThread.IsBackground = true;
     keyInputThread.Start();
 }
-
-// Update tray menu and apply minimized setting (fire and forget)
-_ = Task.Run(async () =>
-{
-    await Task.Delay(200); // Give tray icon time to initialize
-    trayIcon.UpdateHostMappingsMenu(config.HostKeyMappings);
-    if (startMinimized)
-    {
-        trayIcon.HideConsole();
-    }
-});
 
 try
 {

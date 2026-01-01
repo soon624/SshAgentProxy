@@ -226,11 +226,7 @@ public class TrayIcon : IDisposable
             g.DrawPolygon(outlinePen, shaftPoints);
 
             IntPtr hIcon = bitmap.GetHicon();
-            var icon = Icon.FromHandle(hIcon);
-            var clonedIcon = (Icon)icon.Clone();
-            icon.Dispose();
-            DestroyIcon(hIcon);
-            return clonedIcon;
+            return Icon.FromHandle(hIcon);
         }
 
         public void ToggleConsoleState(IntPtr consoleWindow)
