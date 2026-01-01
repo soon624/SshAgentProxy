@@ -25,6 +25,9 @@ public class TrayIcon : IDisposable
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
 
+    [DllImport("user32.dll")]
+    private static extern bool DestroyIcon(IntPtr hIcon);
+
     private const int SW_HIDE = 0;
     private const int SW_SHOW = 5;
     private const int SW_RESTORE = 9;
@@ -48,8 +51,16 @@ public class TrayIcon : IDisposable
         _uiThread.IsBackground = true; // Background thread - main thread controls lifetime
         _uiThread.Start();
 
-        // Don't wait - let it initialize in parallel
-        // _ready.Wait();
+        // Don't wait in constructor - call WaitForInitialization() after key input thread starts
+    }
+
+    /// <summary>
+    /// Wait for the tray icon to be fully initialized.
+    /// Call this after starting any threads that need console input.
+    /// </summary>
+    public void WaitForInitialization(int timeoutMs = 5000)
+    {
+        _ready.Wait(timeoutMs);
     }
 
     internal void InvokeSwitchAgent(string agent)
@@ -215,7 +226,11 @@ public class TrayIcon : IDisposable
             g.DrawPolygon(outlinePen, shaftPoints);
 
             IntPtr hIcon = bitmap.GetHicon();
-            return Icon.FromHandle(hIcon);
+            var icon = Icon.FromHandle(hIcon);
+            var clonedIcon = (Icon)icon.Clone();
+            icon.Dispose();
+            DestroyIcon(hIcon);
+            return clonedIcon;
         }
 
         public void ToggleConsoleState(IntPtr consoleWindow)
