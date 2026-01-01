@@ -89,7 +89,9 @@ On startup, it will:
 While running, you can use these keyboard shortcuts:
 - `1` - Switch to 1Password
 - `2` - Switch to Bitwarden
-- `r` - Rescan keys from current agent
+- `r` - Rescan keys from all agents
+- `h` - Show host key mappings
+- `d` - Delete a host key mapping
 - `q` - Quit
 
 ### Command Line Options
@@ -223,6 +225,10 @@ The SSH agent protocol doesn't include information about which host or repositor
 The proxy detects the target host and repository by inspecting the SSH client process's command line (e.g., `ssh git@github.com git-upload-pack 'owner/repo.git'`). When a matching pattern is found, the corresponding key is prioritized.
 
 **Auto-learning:** When the proxy cannot determine which key to use (no matching pattern), it shows a selection dialog. After you select a key, the mapping is automatically saved to `hostKeyMappings`. The dialog has a configurable timeout (`keySelectionTimeoutSeconds`, default 30) after which it auto-selects the first key.
+
+**Rescan button:** The key selection dialog includes a "Rescan" button. Click it to scan all agents for keys—useful when a newly added key doesn't appear in the list.
+
+**Single agent mode:** If only one agent is configured, the proxy skips the selection dialog entirely and forwards requests directly to the backend. No scanning or agent switching overhead.
 
 ## How It Works
 

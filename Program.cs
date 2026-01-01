@@ -1,4 +1,5 @@
 using SshAgentProxy;
+using SshAgentProxy.UI;
 
 // Command line arguments (processed before mutex check)
 if (args.Length > 0)
@@ -56,28 +57,13 @@ if (args.Length > 0 && args[0] == "--test-switch")
 var version = typeof(SshAgentProxyService).Assembly.GetName().Version;
 var versionStr = version != null ? $"v{version.Major}.{version.Minor}.{version.Build}" : "";
 
-Console.WriteLine("+--------------------------------------+");
-Console.WriteLine($"|     SSH Agent Proxy {versionStr,-17}|");
-Console.WriteLine("|     1Password / Bitwarden Switcher   |");
-Console.WriteLine("+--------------------------------------+");
-Console.WriteLine();
-
 var expectedSock = @"\\.\pipe\ssh-agent-proxy";
 var currentSock = Environment.GetEnvironmentVariable("SSH_AUTH_SOCK", EnvironmentVariableTarget.User);
 
 // Set SSH_AUTH_SOCK user environment variable if not configured
 if (string.IsNullOrEmpty(currentSock) || currentSock != expectedSock)
 {
-    Console.WriteLine($"Setting SSH_AUTH_SOCK environment variable...");
     Environment.SetEnvironmentVariable("SSH_AUTH_SOCK", expectedSock, EnvironmentVariableTarget.User);
-    Console.WriteLine($"  SSH_AUTH_SOCK = {expectedSock}");
-    Console.WriteLine($"  (New terminals will use this automatically)");
-    Console.WriteLine();
-}
-else
-{
-    Console.WriteLine($"SSH_AUTH_SOCK already configured: {currentSock}");
-    Console.WriteLine();
 }
 
 var configPath = Path.Combine(
@@ -86,13 +72,38 @@ var configPath = Path.Combine(
     "config.json");
 
 Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-Console.WriteLine($"Config: {configPath}");
-Console.WriteLine();
 
 var config = Config.LoadOrCreate(configPath);
 
+// Check if console is available
+bool consoleAvailable = true;
+ConsoleUI? ui = null;
+try
+{
+    _ = Console.KeyAvailable;
+    _ = Console.WindowHeight;
+    ui = new ConsoleUI();
+    ui.Initialize(versionStr, configPath, expectedSock);
+}
+catch
+{
+    consoleAvailable = false;
+    // Fallback to simple console output
+    Console.WriteLine($"SSH Agent Proxy {versionStr}");
+    Console.WriteLine($"Config: {configPath}");
+    Console.WriteLine("(Running without interactive console)");
+}
+
 await using var proxy = new SshAgentProxyService(config);
-proxy.OnLog += Console.WriteLine;
+
+if (ui != null)
+{
+    proxy.OnLog += ui.Log;
+}
+else
+{
+    proxy.OnLog += Console.WriteLine;
+}
 
 var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
@@ -103,26 +114,9 @@ Console.CancelKeyPress += (_, e) =>
 
 await proxy.StartAsync(cts.Token);
 
-Console.WriteLine();
-Console.WriteLine("Commands: '1' = switch to 1Password, '2' = switch to Bitwarden, 'r' = rescan keys, 'q' = quit");
-Console.WriteLine("Press Ctrl+C to stop");
-Console.WriteLine();
-
-// Check if console is available
-bool consoleAvailable = true;
 try
 {
-    _ = Console.KeyAvailable;
-}
-catch
-{
-    consoleAvailable = false;
-    Console.WriteLine("(Running without interactive console)");
-}
-
-try
-{
-    if (consoleAvailable)
+    if (consoleAvailable && ui != null)
     {
         while (!cts.Token.IsCancellationRequested)
         {
@@ -140,6 +134,25 @@ try
                     case 'r':
                     case 'R':
                         await proxy.ScanKeysAsync(cts.Token);
+                        break;
+                    case 'h':
+                    case 'H':
+                        ui.ShowHostMappings(config.HostKeyMappings);
+                        break;
+                    case 'd':
+                    case 'D':
+                        var indexToDelete = ui.PromptDeleteMapping(config.HostKeyMappings);
+                        if (indexToDelete.HasValue)
+                        {
+                            var removed = config.HostKeyMappings[indexToDelete.Value];
+                            config.HostKeyMappings.RemoveAt(indexToDelete.Value);
+                            config.Save();
+                            ui.Log($"Deleted: {removed.Pattern}");
+                        }
+                        break;
+                    case 'c':
+                    case 'C':
+                        ui.Refresh();
                         break;
                     case 'q':
                     case 'Q':
@@ -161,7 +174,7 @@ catch (OperationCanceledException)
     // Normal termination
 }
 
-Console.WriteLine();
+ui?.Shutdown();
 Console.WriteLine("Shutting down...");
 Console.WriteLine("Note: SSH_AUTH_SOCK remains set. Run with --uninstall to remove it.");
 

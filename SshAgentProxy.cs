@@ -521,9 +521,31 @@ public class SshAgentProxyService : IAsyncDisposable
         {
             keysToReturn = new List<SshIdentity>(_allKeys);
         }
+        else if (_config.Agents.Count <= 1)
+        {
+            // Single agent: just forward to backend, no need to scan multiple agents
+            Log("  Single agent configured, forwarding to backend...");
+            using var client = await ConnectToBackendAsync(ct);
+            if (client != null)
+            {
+                try
+                {
+                    keysToReturn = await client.RequestIdentitiesAsync(ct);
+                    _keysScanned = true;
+                }
+                catch
+                {
+                    keysToReturn = new List<SshIdentity>();
+                }
+            }
+            else
+            {
+                keysToReturn = new List<SshIdentity>();
+            }
+        }
         else
         {
-            // Scan all agents to build complete key list (needed for first run)
+            // Multiple agents: scan all to build complete key list (needed for first run)
             await ScanAllAgentsAsync(ct);
             keysToReturn = new List<SshIdentity>(_allKeys);
         }
@@ -572,52 +594,70 @@ public class SshAgentProxyService : IAsyncDisposable
             Log("  Could not detect connection info from client process");
         }
 
-        // Show key selection dialog if no host pattern matched and multiple keys available
-        // Only show dialog in interactive environments (not when running as service)
-        if (matchedFingerprint == null && keysToReturn.Count > 1 && Environment.UserInteractive)
+        // Show key selection dialog if:
+        // - No host pattern matched
+        // - Multiple keys available
+        // - Multiple agents configured (no point switching if only one agent)
+        // - Interactive environment (not running as service)
+        if (matchedFingerprint == null && keysToReturn.Count > 1 && _config.Agents.Count > 1 && Environment.UserInteractive)
         {
-            Log($"  Showing key selection dialog ({keysToReturn.Count} keys available)...");
-
-            var selectedKeys = KeySelectionDialog.ShowDialog(
-                keysToReturn,
-                _keyToAgent,
-                _config.KeySelectionTimeoutSeconds);
-
-            if (selectedKeys != null && selectedKeys.Count > 0)
+            bool rescanRequested;
+            do
             {
-                keysToReturn = selectedKeys;
-                Log($"  User selected {keysToReturn.Count} key(s)");
+                Log($"  Showing key selection dialog ({keysToReturn.Count} keys available)...");
 
-                // Auto-save host key mapping if we have connection info
-                if (connectionInfo != null && selectedKeys.Count == 1)
+                var selectedKeys = KeySelectionDialog.ShowDialog(
+                    keysToReturn,
+                    _keyToAgent,
+                    _config.KeySelectionTimeoutSeconds,
+                    out rescanRequested);
+
+                if (rescanRequested)
                 {
-                    var selectedKey = selectedKeys[0];
-                    var owner = connectionInfo.GetOwner();
-                    var pattern = !string.IsNullOrEmpty(owner)
-                        ? $"{connectionInfo.Host}:{owner}/*"
-                        : $"{connectionInfo.Host}:*";
+                    Log("  Rescan requested, scanning all agents...");
+                    _allKeys.Clear();
+                    _keysScanned = false;
+                    await ScanAllAgentsAsync(ct);
+                    keysToReturn = new List<SshIdentity>(_allKeys);
+                    continue;
+                }
 
-                    // Check if this pattern already exists (case-insensitive)
-                    var existing = _config.HostKeyMappings.FirstOrDefault(m =>
-                        string.Equals(m.Pattern, pattern, StringComparison.OrdinalIgnoreCase));
-                    if (existing == null)
+                if (selectedKeys != null && selectedKeys.Count > 0)
+                {
+                    keysToReturn = selectedKeys;
+                    Log($"  User selected {keysToReturn.Count} key(s)");
+
+                    // Auto-save host key mapping if we have connection info
+                    if (connectionInfo != null && selectedKeys.Count == 1)
                     {
-                        // Insert at the beginning so specific patterns take precedence over catch-all patterns
-                        _config.HostKeyMappings.Insert(0, new HostKeyMapping
+                        var selectedKey = selectedKeys[0];
+                        var owner = connectionInfo.GetOwner();
+                        var pattern = !string.IsNullOrEmpty(owner)
+                            ? $"{connectionInfo.Host}:{owner}/*"
+                            : $"{connectionInfo.Host}:*";
+
+                        // Check if this pattern already exists (case-insensitive)
+                        var existing = _config.HostKeyMappings.FirstOrDefault(m =>
+                            string.Equals(m.Pattern, pattern, StringComparison.OrdinalIgnoreCase));
+                        if (existing == null)
                         {
-                            Pattern = pattern,
-                            Fingerprint = selectedKey.Fingerprint,
-                            Description = $"Auto-saved: {selectedKey.Comment}"
-                        });
-                        _config.Save();
-                        Log($"  Saved host mapping: {pattern} -> {selectedKey.Fingerprint}");
+                            // Insert at the beginning so specific patterns take precedence over catch-all patterns
+                            _config.HostKeyMappings.Insert(0, new HostKeyMapping
+                            {
+                                Pattern = pattern,
+                                Fingerprint = selectedKey.Fingerprint,
+                                Description = $"Auto-saved: {selectedKey.Comment}"
+                            });
+                            _config.Save();
+                            Log($"  Saved host mapping: {pattern} -> {selectedKey.Fingerprint}");
+                        }
                     }
                 }
-            }
-            else
-            {
-                Log("  Dialog cancelled, returning all keys");
-            }
+                else
+                {
+                    Log("  Dialog cancelled, returning all keys");
+                }
+            } while (rescanRequested);
         }
         else if (matchedFingerprint == null && keysToReturn.Count > 1 && !Environment.UserInteractive)
         {
