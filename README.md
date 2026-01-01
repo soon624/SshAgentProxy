@@ -192,17 +192,18 @@ The proxy's strategy is optimized based on observed differences between 1Passwor
 | Behavior | 1Password | Bitwarden |
 |----------|-----------|-----------|
 | Key listing when locked | Returns keys | Requires unlock |
-| Pipe acquisition | First-come-first-served | Can steal from others |
-| After other agent exits | Does not auto-acquire pipe | N/A |
+| Pipe acquisition on start | Takes if available | Steals even if taken |
+| After other agent exits | Does not auto-acquire | Does not auto-acquire |
 
 **Implications:**
 
 - **Bitwarden unlock prompts**: Querying Bitwarden (even just listing keys) triggers an unlock prompt. The proxy minimizes Bitwarden interactions by using cached key mappings and process detection instead of pipe queries.
-- **Pipe ownership detection**: Instead of querying the pipe (which would trigger Bitwarden unlock), the proxy checks which agent processes are running:
-  - Bitwarden running → Bitwarden owns the pipe
-  - Only 1Password running → Check pipe with a lightweight scan (1Password responds without unlock)
+- **Pipe ownership detection**: Instead of querying the pipe (which would trigger Bitwarden unlock), the proxy infers ownership from process state:
+  - Both running → Bitwarden owns the pipe (because it steals on start)
+  - Only 1Password running → Check pipe with a lightweight scan (1Password responds without unlock); if no response, pipe may be orphaned
+  - Only Bitwarden running → Bitwarden owns the pipe
   - Neither running → No one owns the pipe
-- **Startup optimization**: If key mappings already reference 2+ different agents, the proxy skips the initial scan entirely and uses cached data.
+- **Startup optimization**: If key mappings already reference 2+ different agents, the proxy skips the initial scan to avoid unnecessary Bitwarden unlock prompts. Cached data is used instead. If a signing request comes for an unknown key, the proxy will scan agents as needed. Press `r` to manually rescan.
 
 ## Troubleshooting
 
