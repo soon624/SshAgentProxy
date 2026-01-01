@@ -36,9 +36,9 @@ SSH Agent Proxy creates its own named pipe (`\\.\pipe\ssh-agent-proxy`) and acts
 ## Requirements
 
 - Windows 10/11
-- .NET 10.0 Runtime
 - 1Password with SSH Agent enabled
 - Bitwarden with SSH Agent enabled (optional)
+- .NET 10.0 SDK (only for building from source)
 
 ## Installation
 
@@ -52,7 +52,7 @@ SSH Agent Proxy creates its own named pipe (`\\.\pipe\ssh-agent-proxy`) and acts
 
 2. Build and publish:
    ```
-   dotnet publish -c Release -o ./publish
+   dotnet publish SshAgentProxy.csproj -c Release -r win-x64 --self-contained -o ./publish
    ```
 
 3. Run the proxy:

@@ -36,9 +36,9 @@ SSH Agent Proxyは独自の名前付きパイプ（`\\.\pipe\ssh-agent-proxy`）
 ## 必要要件
 
 - Windows 10/11
-- .NET 10.0 ランタイム
 - SSHエージェントを有効にした1Password
 - SSHエージェントを有効にしたBitwarden（オプション）
+- .NET 10.0 SDK（ソースからビルドする場合のみ）
 
 ## インストール
 
@@ -52,7 +52,7 @@ SSH Agent Proxyは独自の名前付きパイプ（`\\.\pipe\ssh-agent-proxy`）
 
 2. ビルドして発行：
    ```
-   dotnet publish -c Release -o ./publish
+   dotnet publish SshAgentProxy.csproj -c Release -r win-x64 --self-contained -o ./publish
    ```
 
 3. プロキシを実行：
