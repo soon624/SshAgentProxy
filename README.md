@@ -38,7 +38,7 @@ SSH Agent Proxy creates its own named pipe (`\\.\pipe\ssh-agent-proxy`) and acts
 - Windows 10/11
 - 1Password with SSH Agent enabled
 - Bitwarden with SSH Agent enabled (optional)
-- .NET 10.0 SDK (only for building from source)
+- .NET 10.0 Runtime
 
 ## Installation
 

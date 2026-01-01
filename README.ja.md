@@ -38,7 +38,7 @@ SSH Agent Proxyは独自の名前付きパイプ（`\\.\pipe\ssh-agent-proxy`）
 - Windows 10/11
 - SSHエージェントを有効にした1Password
 - SSHエージェントを有効にしたBitwarden（オプション）
-- .NET 10.0 SDK（ソースからビルドする場合のみ）
+- .NET 10.0 ランタイム
 
 ## インストール
 

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -9,6 +9,14 @@
     <Version>3.0.1</Version>
     <AssemblyTitle>SSH Agent Proxy</AssemblyTitle>
     <Description>Windows SSH agent proxy that switches between 1Password and Bitwarden</Description>
+  </PropertyGroup>
+
+  <!-- Publish settings -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>
